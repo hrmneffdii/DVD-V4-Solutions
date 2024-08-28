@@ -86,14 +86,19 @@ contract ClimberTimelock is ClimberTimelockBase {
         }
 
         bytes32 id = getOperationId(targets, values, dataElements, salt);
+         // @audit-high, checking in early moment, make protocol better in secure.
+        if (getOperationState(id) != OperationState.ReadyForExecution) {
+            revert NotReadyForExecution(id);
+        }
 
         for (uint8 i = 0; i < targets.length; ++i) {
             targets[i].functionCallWithValue(dataElements[i], values[i]);
         }
 
-        if (getOperationState(id) != OperationState.ReadyForExecution) {
-            revert NotReadyForExecution(id);
-        }
+        // // @audit-high, checking in early moment, make protocol better in secure.
+        // if (getOperationState(id) != OperationState.ReadyForExecution) {
+        //     revert NotReadyForExecution(id);
+        // }
 
         operations[id].executed = true;
     }

