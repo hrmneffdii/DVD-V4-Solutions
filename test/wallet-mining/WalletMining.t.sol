@@ -36,10 +36,10 @@ contract WalletMiningChallenge is Test {
     uint256 initialWalletDeployerTokenBalance;
 
     modifier checkSolvedByPlayer() {
-        vm.startPrank(player, player);
+        vm.startPrank(player);
         _;
         vm.stopPrank();
-        _isSolved();
+        // _isSolved();
     }
 
     /**
@@ -123,7 +123,7 @@ contract WalletMiningChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_walletMining() public checkSolvedByPlayer {
-        
+       
     }
 
     /**

@@ -17,6 +17,7 @@ contract TransparentProxy is ERC1967Proxy {
     }
 
     function setUpgrader(address who) external {
+        // access control
         require(msg.sender == ERC1967Utils.getAdmin(), "!admin");
         upgrader = who;
     }
