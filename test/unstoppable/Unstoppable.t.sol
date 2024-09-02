@@ -94,8 +94,6 @@ contract UnstoppableChallenge is Test {
      */
     function test_unstoppable() public checkSolvedByPlayer {
         require(token.transfer(address(vault), INITIAL_PLAYER_TOKEN_BALANCE));
-        console.log(vault.totalAssets());
-        console.log(vault.totalSupply());
     }
 
     /**
